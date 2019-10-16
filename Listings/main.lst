@@ -1,0 +1,253 @@
+C51 COMPILER V9.54   MAIN                                                                  10/16/2019 22:37:01 PAGE 1   
+
+
+C51 COMPILER V9.54, COMPILATION OF MODULE MAIN
+OBJECT MODULE PLACED IN .\Objects\main.obj
+COMPILER INVOKED BY: E:\Keil_v5\C51\BIN\C51.EXE main.c OPTIMIZE(8,SPEED) BROWSE DEBUG OBJECTEXTEND PRINT(.\Listings\main
+                    -.lst) OBJECT(.\Objects\main.obj)
+
+line level    source
+
+   1          #include<reg52.h>
+   2          
+   3          sbit KEY_OUT_1 = P2^3;
+   4          sbit KEY_OUT_2 = P2^2;
+   5          sbit KEY_OUT_3 = P2^1;
+   6          sbit KEY_OUT_4 = P2^0;
+   7          sbit KEYSTART = P2^6;
+   8          sbit KEYTOWARD = P2^7;
+   9          sbit ADDR1 = P1^1;
+  10          sbit ADDR2 = P1^2;
+  11          sbit ADDR3 = P1^3;
+  12          sbit ENLED = P1^4;
+  13          
+  14          unsigned char code LedNum[17] = {0xC0, 0xF9, 0xA4, 0xB0, 0x99, 0x92, 0x82, 0xF8,
+  15                                                                          0x80, 0x90, 0x88, 0x83, 0xC6, 0xA1, 0x86, 0x8E, 0x7F};
+  16          unsigned char LedBuff[4] = {0xC0, 0xC0, 0xC0, 0xC0};
+  17          
+  18          unsigned int LedCnt = 0;        //记录T0中断次数 
+  19          unsigned int score = 0;         //当前得分
+  20          bit start = 0;  //判断是否开始，0为暂停 1为开始/继续
+  21          
+  22          unsigned char NowPicture[8] = {0xFF, 0xBF, 0xFF, 0xFF, 
+  23                                                                          0xFD, 0xFD, 0xFD, 0xFF};        //当前刷新行处的P0值
+  24          /*
+  25          0为亮，与NowPicture相同
+  26          unsigned char map[8][8] = {
+  27                  {1,1,1,1,1,1,1,1},
+  28                  {1,1,1,1,1,1,0,1},
+  29                  {1,1,1,1,1,1,1,1},
+  30                  {1,1,1,1,1,1,1,1},
+  31                  {1,0,1,1,1,1,1,1},
+  32                  {1,0,1,1,1,1,1,1},
+  33                  {1,0,1,1,1,1,1,1},
+  34                  {1,1,1,1,1,1,1,1}
+  35          };*/
+  36          unsigned char FoodPosition[2] = {1,6};  //默认食物位置 都是行先列后
+  37          unsigned int body[3][2] = {
+  38                  {4,1},{5,1},{6,1}
+  39                  //头 身体 尾
+  40          };
+  41          char toward[4][2] = {
+  42                  {-1,0},{1,0},{0,-1},{0,1}
+  43                  //上下左右
+  44          };
+  45          char NowToward = 0;     //默认向上
+  46          //当前按键状态
+  47          bit KeyUp = 1;
+  48          bit KeyDown = 1;
+  49          bit KeyLeft = 1;
+  50          bit KeyRight = 1;
+  51          bit KeyStart = 1;
+  52          
+  53          void LedScan(); //扫描led
+  54          void KeyScan(); //扫描键盘
+C51 COMPILER V9.54   MAIN                                                                  10/16/2019 22:37:01 PAGE 2   
+
+  55          
+  56          void main()
+  57          {
+  58   1          EA = 1;       //使能总中断
+  59   1          ENLED = 0;    //使能U3，选择控制数码管
+  60   1      
+  61   1          TMOD = 0x11;  //设置T0 T1为模式1
+  62   1          TH0  = 0xFC;  //为T0赋初值0xEC67，定时1ms
+  63   1          TL0  = 0x67;
+  64   1          ET0  = 1;     //使能T0中断
+  65   1          TR0  = 1;     //启动T0
+  66   1              TR1  = 1;     //启动T1
+  67   1      
+  68   1              while(1)
+  69   1              {
+  70   2              if (LedCnt >= 500 && start)  //判断0.5秒定时标志（大于是因为防止暂停时ledcnt还在加）  默认0.5s动一
+             -次画面
+  71   2              {
+  72   3                  //0.5秒定时标志清零
+  73   3                              LedCnt = 0;
+  74   3                              
+  75   3                              //移动蛇
+  76   3                              //熄灭旧尾巴
+  77   3                              NowPicture[body[2][0]] = 1 << body[2][1] | NowPicture[body[2][0]];
+  78   3                              body[2][0] = body[1][0];
+  79   3                              body[2][1] = body[1][1];
+  80   3                              
+  81   3                              body[1][0] = body[0][0];
+  82   3                              body[1][1] = body[0][1];
+  83   3                              
+  84   3                              body[0][0] = body[0][0] + toward[NowToward][0];
+  85   3                              body[0][1] = body[0][1] + toward[NowToward][1];
+  86   3                              if(body[0][0] == -1)    body[0][0] = 7;
+  87   3                              if(body[0][0] == 8)             body[0][0] = 0;
+  88   3                              if(body[0][1] == -1)    body[0][1] = 7;
+  89   3                              if(body[0][1] == 8)             body[0][1] = 0;                         
+  90   3                              //点亮新头部
+  91   3                              NowPicture[body[0][0]] = ~(1 << body[0][1]) & NowPicture[body[0][0]];
+  92   3                              
+  93   3                              //吃到食物
+  94   3                              if(body[0][0] == FoodPosition[0] && body[0][1] == FoodPosition[1])
+  95   3                              {
+  96   4                                      score++;
+  97   4                                      //新食物位置
+  98   4                                      FoodPosition[0] = TL1 % 8;
+  99   4                                      FoodPosition[1] = TH1 % 8;
+ 100   4                              }
+ 101   3                              
+ 102   3                              //点亮食物
+ 103   3                              NowPicture[FoodPosition[0]] = ~(1 << FoodPosition[1]) & NowPicture[FoodPosition[0]];
+ 104   3                              
+ 105   3                              //以下代码将score按十进制位从低到高依次提取并转为数码管显示字符
+ 106   3                  LedBuff[0] = LedNum[score%10];
+ 107   3                  LedBuff[1] = LedNum[score/10%10];
+ 108   3                  LedBuff[2] = LedNum[score/100%10];
+ 109   3                  LedBuff[3] = LedNum[score/1000%10];       
+ 110   3              }       
+ 111   2              }
+ 112   1      }
+ 113          
+ 114          // 定时器0中断服务函数 
+ 115          void InterruptTimer0() interrupt 1
+C51 COMPILER V9.54   MAIN                                                                  10/16/2019 22:37:01 PAGE 3   
+
+ 116          {
+ 117   1          TH0 = 0xFC; //重新加载初值
+ 118   1          TL0 = 0x67;
+ 119   1          LedScan();
+ 120   1              KeyScan();
+ 121   1      }
+ 122          void LedScan()
+ 123          {
+ 124   1              static unsigned char index = 0;         //动态扫描的索引
+ 125   1              LedCnt++;       //中断次数计数值加1
+ 126   1              index++;                //动态扫描的索引加1
+ 127   1              if(index == 12) index = 0;      //循环
+ 128   1          if (index < 4)  //刷新计分板
+ 129   1          {
+ 130   2                      ADDR3 = 1;      //选计分板
+ 131   2                      
+ 132   2                      //以下代码完成数码管动态扫描刷
+ 133   2                      P0 = 0xFF;   //显示消隐
+ 134   2                      P1 = (P1 & 0xF8) | index;       //选择位数8 + index
+ 135   2                      P0 = LedBuff[index];
+ 136   2                      
+ 137   2          }
+ 138   1              else    //刷新led点阵
+ 139   1              {
+ 140   2                      ADDR3 = 0;      //选点阵        
+ 141   2                      
+ 142   2                      //以下代码完成点阵动态扫描刷新
+ 143   2                      P0 = 0xFF;   //显示消隐
+ 144   2                      P1 = index - 4; //选择行数
+ 145   2                      P0 = NowPicture[index - 4];
+ 146   2              }
+ 147   1      }
+ 148          
+ 149          // 按键扫描函数，需在定时中断中调用，推荐调用间隔1ms 
+ 150          void KeyScan()
+ 151          {
+ 152   1              static unsigned char KeyIndex = 0;
+ 153   1              //扫描缓冲区保存一段时间的扫描值,上下左右开始
+ 154   1          static unsigned char KeyUpBuf = 0xFF;
+ 155   1              static unsigned char KeyDonwBuf = 0xFF;
+ 156   1              static unsigned char KeyLeftBuf = 0xFF;
+ 157   1              static unsigned char KeyRightBuf = 0xFF;
+ 158   1              static unsigned char KeyStartBuf = 0xFF;
+ 159   1              
+ 160   1              //开启各个开关，将当前扫描值压入缓冲区
+ 161   1              switch(KeyIndex)
+ 162   1              {
+ 163   2                      case 0:
+ 164   2                              KEY_OUT_1 = 0;
+ 165   2                              KeyUpBuf = (KeyUpBuf << 1) | KEYTOWARD;
+ 166   2                              KEY_OUT_1 = 1;  //及时关闭，防止干扰
+ 167   2                              KeyIndex++;
+ 168   2                              break;
+ 169   2                      case 1:
+ 170   2                              KEY_OUT_2 = 0;
+ 171   2                              KeyLeftBuf = (KeyLeftBuf << 1) | KEYTOWARD;
+ 172   2                              KEY_OUT_2 = 1;
+ 173   2                              KeyIndex++;
+ 174   2                              break;
+ 175   2                      case 2:
+ 176   2                              KEY_OUT_3 = 0;
+ 177   2                              KeyDonwBuf = (KeyDonwBuf << 1) | KEYTOWARD;
+C51 COMPILER V9.54   MAIN                                                                  10/16/2019 22:37:01 PAGE 4   
+
+ 178   2                              KEY_OUT_3 = 1;
+ 179   2                              KeyIndex++;
+ 180   2                              break;
+ 181   2                      case 3:
+ 182   2                              KEY_OUT_4 = 0;
+ 183   2                              KeyRightBuf = (KeyRightBuf << 1) | KEYTOWARD;
+ 184   2                              KEY_OUT_4 = 1;
+ 185   2                              KeyIndex++;
+ 186   2                              break;
+ 187   2                      default:
+ 188   2                              KEY_OUT_4 = 0;
+ 189   2                              KeyStartBuf = (KeyStartBuf << 1) | KEYSTART;
+ 190   2                              KEY_OUT_4 = 1;
+ 191   2                              KeyIndex = 0;
+ 192   2                              break;
+ 193   2              }
+ 194   1              
+ 195   1              //连续8次都为0,即40ms，判断为按下
+ 196   1              if(KeyUpBuf == 0x00)
+ 197   1              {
+ 198   2                      NowToward = 0;
+ 199   2              }
+ 200   1              else if(KeyDonwBuf == 0x00)
+ 201   1              {
+ 202   2                      NowToward = 1;
+ 203   2              }
+ 204   1              else if(KeyLeftBuf == 0x00)
+ 205   1              {
+ 206   2                      NowToward = 2;
+ 207   2              }
+ 208   1              else if(KeyRightBuf == 0x00)
+ 209   1              {
+ 210   2                      NowToward = 3;
+ 211   2              }
+ 212   1              else if(KeyStartBuf == 0x00)    //防止长按出bug
+ 213   1              {
+ 214   2                      KeyStart = 0;
+ 215   2              }
+ 216   1              else if(KeyStartBuf == 0xFF && KeyStart == 0)   //防止长按出bug
+ 217   1              {
+ 218   2                      KeyStart = 1;
+ 219   2                      start = ~start;
+ 220   2              }
+ 221   1      }
+ 222          
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =    688    ----
+   CONSTANT SIZE    =     17    ----
+   XDATA SIZE       =   ----    ----
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =     46    ----
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =      6    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)
