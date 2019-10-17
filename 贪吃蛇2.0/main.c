@@ -183,10 +183,9 @@ void main()
 					NowPicture[body[Tail].x] = ~(1 << body[Tail].y) & NowPicture[body[Tail].x];
 					
 					score++;
-					if(score == 64)
+					if(score == 26)
 					{
 						Win = 1;
-						continue;
 					}
 					//新食物位置 由T1计时器决定
 					do
